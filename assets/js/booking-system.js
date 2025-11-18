@@ -1,5 +1,9 @@
 // ./assets/js/booking-system.js
 
+// Adicione esta linha no topo
+const API_BASE_URL = 'http://kamilalima.vercel.app/api'; 
+// ATENÇÃO: Usaremos 'localhost' por enquanto.
+
 const state = {
     currentStep: 1,
     selectedService: null,
@@ -11,30 +15,82 @@ const state = {
         'manicure': { name: 'Manicure + Pedicure', duration: 60 },
         'coloracao': { name: 'Coloração', duration: 90 }
     },
-    // Simulação de horários indisponíveis (como se já tivessem sido agendados)
-    // Formato: 'YYYY-MM-DD': ['HH:MM', 'HH:MM']
-    unavailableTimes: {
-        '2025-11-20': ['10:00', '11:30'],
-        '2025-11-21': ['14:00']
-    },
+    // Formato: 'YYYY-MM-DD': [{start: 'HH:MM', end: 'HH:MM'}, ...]
+    unavailableTimes: {}, 
     // Configuração de funcionamento do salão
     openingTime: 9 * 60, // 09:00 em minutos (9 * 60)
     closingTime: 18 * 60, // 18:00 em minutos (18 * 60)
     interval: 30 // Intervalo de agendamento em minutos
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+/**
+ * Funções Auxiliares
+ */
+
+// Função auxiliar para converter HH:MM ou HH:MM:SS em minutos (09:00 -> 540)
+function timeToMinutes(timeString) {
+    // Pega apenas HH e MM
+    const parts = timeString.substring(0, 5).split(':');
+    const h = Number(parts[0]);
+    const m = Number(parts[1]);
+    return h * 60 + m;
+}
+
+/**
+ * Funções de Comunicação com a API 
+ */
+async function fetchUnavailableTimes() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/horarios-indisponiveis`);
+        
+        if (!response.ok) {
+            throw new Error(`Falha ao buscar horários: ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        // Formata os dados para o frontend (agora inclui a hora de fim)
+        const newUnavailableTimes = {};
+        data.forEach(booking => {
+            const date = booking.data;      
+            // Pega apenas HH:MM (removendo :SS que pode vir do MySQL TIME)
+            const timeStart = booking.hora_inicio.substring(0, 5); 
+            const timeEnd = booking.hora_fim.substring(0, 5);       
+            
+            if (!newUnavailableTimes[date]) {
+                newUnavailableTimes[date] = [];
+            }
+            // Armazenamos o objeto completo de INÍCIO e FIM para a lógica de sobreposição
+            newUnavailableTimes[date].push({
+                start: timeStart,
+                end: timeEnd
+            });
+        });
+        
+        state.unavailableTimes = newUnavailableTimes;
+        // console.log('Horários indisponíveis (por intervalo) carregados:', state.unavailableTimes);
+
+    } catch (error) {
+        console.error('Erro fatal ao buscar horários:', error);
+    }
+}
+
+// --- FUNÇÃO DE INICIALIZAÇÃO DO SCRIPT ---
+document.addEventListener('DOMContentLoaded', async () => {
     // 1. Configura a data mínima no input para hoje
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('date-input').min = today;
 
-    // 2. Adiciona listeners de eventos
+    // 2. BUSCA OS HORÁRIOS DO BACKEND ANTES DE TUDO
+    await fetchUnavailableTimes();
+
+    // 3. Adiciona listeners de eventos
     document.getElementById('service-select').addEventListener('change', handleServiceChange);
     document.getElementById('date-input').addEventListener('change', handleDateChange);
-    document.getElementById('client-name').addEventListener('input', checkStep3Validity); // Listener para validação de nome
+    document.getElementById('client-name').addEventListener('input', checkStep3Validity); 
     document.getElementById('booking-form').addEventListener('submit', submitBooking);
 
-    // 3. Inicializa o estado visual
+    // 4. Inicializa o estado visual
     updateStepDisplay();
 });
 
@@ -68,6 +124,8 @@ function resetBooking() {
     state.selectedTime = null;
     document.getElementById('booking-form').reset();
     document.getElementById('time-slots').innerHTML = '<p>Selecione uma data para ver os horários disponíveis.</p>';
+    document.getElementById('next-step-1').disabled = true; 
+    document.getElementById('next-step-2').disabled = true; 
     updateStepDisplay();
 }
 
@@ -77,7 +135,12 @@ function resetBooking() {
 function handleServiceChange(event) {
     const serviceKey = event.target.value;
     state.selectedService = state.services[serviceKey];
+    // Habilita/Desabilita o botão Próximo do Passo 1
     document.getElementById('next-step-1').disabled = !state.selectedService;
+    // Se já havia uma data selecionada, recalcula os slots com o novo serviço
+    if(state.selectedDate) {
+        generateTimeSlots(state.selectedDate);
+    }
 }
 
 function handleDateChange(event) {
@@ -87,6 +150,7 @@ function handleDateChange(event) {
     generateTimeSlots(state.selectedDate);
 }
 
+// 🛑 FUNÇÃO CHAVE COM A LÓGICA DE BLOQUEIO POR DURAÇÃO (CORRIGIDA)
 function generateTimeSlots(dateString) {
     const slotsContainer = document.getElementById('time-slots');
     slotsContainer.innerHTML = '';
@@ -101,8 +165,10 @@ function generateTimeSlots(dateString) {
     const nowMinutes = isToday ? (new Date().getHours() * 60 + new Date().getMinutes()) : 0;
     
     let time = state.openingTime;
-    const duration = state.selectedService.duration;
-    const availableTimes = state.unavailableTimes[dateString] || [];
+    const serviceDuration = state.selectedService.duration;
+    
+    // Horários de início/fim aprovados para a data
+    const approvedBookings = state.unavailableTimes[dateString] || []; 
     let hasSlots = false;
 
     // Cabeçalho da área de horários
@@ -113,20 +179,44 @@ function generateTimeSlots(dateString) {
     const grid = document.createElement('div');
     grid.classList.add('time-grid');
 
-    while (time + duration <= state.closingTime) {
-        const hour = Math.floor(time / 60).toString().padStart(2, '0');
-        const minute = (time % 60).toString().padStart(2, '0');
+    // Itera por intervalos de 30 minutos (state.interval)
+    while (time + state.interval <= state.closingTime) { 
+        const startMinutes = time;
+        const endMinutes = time + serviceDuration; // Fim do NOVO agendamento
+        
+        const hour = Math.floor(startMinutes / 60).toString().padStart(2, '0');
+        const minute = (startMinutes % 60).toString().padStart(2, '0');
         const slot = `${hour}:${minute}`;
         
-        // Verifica se o slot já passou (se for hoje)
-        const slotMinutes = time;
-        if (isToday && slotMinutes < nowMinutes) {
+        // 1. Verifica se o slot já passou (se for hoje)
+        if (isToday && startMinutes < nowMinutes) {
             time += state.interval;
             continue;
         }
 
-        // Verifica indisponibilidade (simulação simples)
-        if (!availableTimes.includes(slot)) {
+        // 2. Verifica se o agendamento de serviço cabe
+        if (endMinutes > state.closingTime) {
+             time += state.interval;
+             continue; // Não há tempo suficiente para completar o serviço
+        }
+        
+        let isTimeAvailable = true;
+        
+        // 3. Lógica de Sobreposição: Verifica se o NOVO agendamento conflita com algum APROVADO
+        for (const booking of approvedBookings) {
+            const approvedStart = timeToMinutes(booking.start);
+            const approvedEnd = timeToMinutes(booking.end); 
+            
+            // Ocupado se o intervalo do novo agendamento (startMinutes a endMinutes)
+            // se sobrepõe ao intervalo do agendamento aprovado (approvedStart a approvedEnd)
+            if (startMinutes < approvedEnd && endMinutes > approvedStart) {
+                isTimeAvailable = false;
+                break; 
+            }
+        }
+
+        // 4. Cria o botão
+        if (isTimeAvailable) {
             const button = document.createElement('button');
             button.type = 'button';
             button.classList.add('time-slot-btn');
@@ -135,17 +225,27 @@ function generateTimeSlots(dateString) {
             button.addEventListener('click', selectTimeSlot);
             grid.appendChild(button);
             hasSlots = true;
+        } else {
+            // Se indisponível
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.classList.add('time-slot-btn', 'unavailable');
+            button.textContent = `${slot} (Ocupado)`;
+            button.disabled = true;
+            grid.appendChild(button);
+            hasSlots = true; 
         }
         
-        time += state.interval;
+        time += state.interval; // Passa para o próximo intervalo (30 minutos)
     }
     
     slotsContainer.appendChild(grid);
 
-    if (!hasSlots) {
+    if (!hasSlots && slotsContainer.children.length === 1) { 
         slotsContainer.innerHTML = '<p class="no-slots-message">Nenhum horário disponível nesta data. Tente outra.</p>';
     }
 }
+
 
 function selectTimeSlot(event) {
     // Remove a classe 'selected' de todos os botões de horário
@@ -181,51 +281,90 @@ function checkStep3Validity() {
     const nameInput = document.getElementById('client-name');
     const submitButton = document.getElementById('submit-booking');
     
-    // VERIFICAÇÃO APERFEIÇOADA:
-    // 1. Garante que o nome não é vazio e não é apenas espaços em branco (trim().length > 0)
     const isNameValid = nameInput.value.trim().length > 0;
-    // 2. Garante que a reserva (serviço, data e hora) está completa
     const isBookingReady = state.selectedService && state.selectedDate && state.selectedTime;
     
-    // O botão só fica ativo se AMBAS as condições forem verdadeiras
     submitButton.disabled = !(isNameValid && isBookingReady);
 }
 
 /**
  * Funções de Envio
  */
-function submitBooking(event) {
-    event.preventDefault(); // Impede o envio padrão do formulário
-    
+async function submitBooking(event) {
+    event.preventDefault(); // Impedir o envio padrão do formulário
+
     const clientName = document.getElementById('client-name').value;
     const clientWhatsapp = document.getElementById('client-whatsapp').value;
     
-    const serviceName = state.selectedService.name;
-    const dateFormatted = document.getElementById('summary-date').textContent;
-    const timeFormatted = state.selectedTime;
+    const service = state.selectedService;
+    const date = state.selectedDate; // Formato YYYY-MM-DD
+    const time = state.selectedTime; // Formato HH:MM
     
-    // Texto da mensagem a ser enviada pelo WhatsApp
-    const whatsappMessage = 
-        `Olá Kamila Lima! Gostaria de confirmar meu agendamento com os seguintes dados:\n\n` +
-        `💅 Serviço: *${serviceName}*\n` +
-        `🗓 Data: *${dateFormatted}*\n` +
-        `⏰ Horário: *${timeFormatted}*\n` +
-        `👤 Cliente: *${clientName}*\n` +
-        `\nObrigado!`;
+    // 1. Calcular a Hora de Fim do Serviço
+    const [startHour, startMinute] = time.split(':').map(Number);
+    const totalMinutes = (startHour * 60) + startMinute + service.duration;
+    const endHour = Math.floor(totalMinutes / 60);
+    const endMinute = totalMinutes % 60;
     
-    // Número de telefone da Kamila Lima
-    const whatsappLink = 
-        `https://api.whatsapp.com/send?phone=5582988334997&text=${encodeURIComponent(whatsappMessage)}`;
+    const horaFim = `${String(endHour).padStart(2, '0')}:${String(endMinute).padStart(2, '0')}`;
 
-    // Exibe a mensagem de sucesso
-    document.querySelectorAll('.booking-step').forEach(step => step.classList.remove('active'));
-    document.getElementById('confirmation-message').classList.add('active');
-    
-    // Redireciona para o WhatsApp após um pequeno atraso
-    setTimeout(() => {
-        window.open(whatsappLink, '_blank');
-    }, 1500); // 1.5 segundos de atraso para o usuário ver a confirmação
+    // 2. Montar os dados para o Backend
+    const bookingData = {
+        cliente_nome: clientName,
+        cliente_whatsapp: clientWhatsapp,
+        servico_nome: service.name,
+        data_agendamento: date,
+        hora_inicio: time,
+        hora_fim: horaFim // Enviamos a hora_fim calculada
+    };
 
-    // O agendamento real (e a atualização do unavailableTimes) exigiria um Backend.
-    // Esta é a solução de "agendamento por WhatsApp" (Frontend puro).
+    try {
+        // 3. Enviar dados para a API (POST)
+        const response = await fetch(`${API_BASE_URL}/agendamentos`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(bookingData)
+        });
+
+        const result = await response.json();
+
+        if (response.status === 201) {
+            // Agendamento Salvo com status 'PENDENTE'
+            
+            // CRIAÇÃO DO LINK DE APROVAÇÃO (USA O ID RETORNADO)
+            const approvalLink = `http://127.0.0.1:5000/api/agendamentos/${result.id}/aprovar`;
+
+            // CORREÇÃO FINAL: Usando a variável approvalLink na mensagem
+            const whatsappMessage = 
+                `Olá Kamila Lima! NOVO AGENDAMENTO PENDENTE (ID: ${result.id}). Por favor, APROVE para bloquear o horário:\n\n` +
+                `💅 Serviço: *${service.name}*\n` +
+                `🗓 Data: *${document.getElementById('summary-date').textContent}*\n` +
+                `⏰ Horário: *${time}*\n` +
+                `👤 Cliente: *${clientName}* (${clientWhatsapp})\n\n` +
+                `👉 **CLIQUE PARA APROVAR ESTE AGENDAMENTO:** ${approvalLink}`; // Link dinâmico
+
+            const whatsappLink = 
+                `https://api.whatsapp.com/send?phone=5582988334997&text=${encodeURIComponent(whatsappMessage)}`;
+            
+            // 4. Exibir sucesso
+            document.querySelectorAll('.booking-step').forEach(step => step.classList.remove('active'));
+            document.getElementById('confirmation-message').classList.add('active');
+            
+            // 5. Redireciona para o WhatsApp após um pequeno atraso
+            setTimeout(() => {
+                window.open(whatsappLink, '_blank');
+            }, 1500);
+
+        } else {
+            alert(`Erro ao agendar: ${result.erro || 'Erro desconhecido.'}`);
+        }
+
+    } catch (error) {
+        console.error('Erro na comunicação com o backend:', error);
+        alert('Erro de conexão. Verifique se o servidor local está rodando.');
+    }
+
+    return false;
 }
