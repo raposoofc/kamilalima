@@ -249,11 +249,13 @@ async function submitBooking(event) {
     // Como não há backend, não há ID nem link de aprovação.
     
     const whatsappMessage = 
-        `Olá Kamila Lima! SOLICITAÇÃO DE AGENDAMENTO. Por favor, confirme se o horário está livre.\\n\\n` +
-        `💅 Serviço: *${service.name}*\\n` +
-        `🗓 Data: *${document.getElementById('summary-date').textContent}*\\n` +
-        `⏰ Horário: *${time}*\\n` +
-        `👤 Cliente: *${clientName}* (WhatsApp: ${clientWhatsapp})\\n\\n` +
+        `Olá Kamila Lima!\n\n` +
+        `*SOLICITAÇÃO DE AGENDAMENTO*\n\n` +
+        `Por favor, confirme se o horário que estou solicitando está livre.\n\n` +
+        `💅 Serviço: *${service.name}*\n` +
+        `🗓 Data: *${document.getElementById('summary-date').textContent}*\n` +
+        `⏰ Horário: *${time}*\n` +
+        `👤 Cliente: *${clientName}* (WhatsApp: ${clientWhatsapp})\n\n` +
         `⚠️ ATENÇÃO: Confirme este agendamento manualmente!`;
         
     const whatsappLink = 

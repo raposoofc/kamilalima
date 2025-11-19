@@ -127,8 +127,8 @@ body {
 }
 
 #site-header .title-script {
-    font-family: 'Shadow Script', cursive;
-    color: #80565D;
+    font-family: 'Ruda', cursive;
+    color: #000000;
     margin: 0;
     font-size: 3.5em;
     line-height: 1;
@@ -267,6 +267,7 @@ body {
     box-sizing: border-box;
     font-size: 1em;
     transition: border-color 0.3s;
+    margin-bottom: 20px;
 }
 
 #booking-main #booking-form .booking-step input:focus,
@@ -279,6 +280,7 @@ body {
     display: flex;
     justify-content: space-between;
     margin-top: 25px;
+    gap: 10px;
 }
 
 #booking-main #booking-form .booking-step button {
@@ -289,10 +291,11 @@ body {
     font-size: 1em;
     transition: background-color 0.3s, opacity 0.3s;
     flex-grow: 1;
-    margin: 0 5px;
+    margin: 0;
 }
 
 #booking-main #booking-form .booking-step button:last-child {
+    margin-top: 0;
     margin-right: 0;
 }
 
@@ -310,7 +313,7 @@ body {
 #booking-main #booking-form .booking-step button:first-child:not(#submit-booking) {
     background-color: #D9D9D9;
     color: #000000;
-    flex-grow: 0;
+    flex-grow: 1;
 }
 
 /* Estilo para botão 'Confirmar' */
@@ -452,6 +455,11 @@ body {
 #services-main .service-category .service-item {
     border-bottom: 1px dashed #D9D9D9;
     padding: 15px 0;
+}
+
+#services-main .service-category .service-item.featured-review:hover {
+    border-left: 5px solid #80565D;
+    padding-left: 8px;
 }
 
 #services-main .service-category .service-item:last-child {
@@ -771,13 +779,13 @@ body {
     transition: transform 0.3s;
 }
 
-#testimonials-main #testimonial-list .testimonial-card:hover {
+#testimonials-main #testimonial-list .testimonial-card.featured-review:hover {
+    border-left: 5px solid #80565D;
     transform: translateY(-3px);
     box-shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
 }
 
-#testimonials-main #testimonial-list .testimonial-card.featured-review {
-    border-left: 5px solid #80565D;
+#testimonials-main #testimonial-list .testimonial-card {
     background-color: #F8F1E4; /* Cor clara de #F7ECE0 */
 }
 
@@ -860,6 +868,7 @@ body {
 }
 
 #tips-main #tips-list .tip-post:hover {
+    border-left: 5px solid #80565D;
     box-shadow: 0 4px 12px rgba(128, 86, 93, 0.15); /* Cor de sombra levemente escura da Secondary */
 }
 
@@ -933,7 +942,8 @@ body {
     transition: transform 0.3s;
 }
 
-#products-main #product-grid .product-card:hover {
+#products-main #product-grid .product-card.featured-review:hover {
+    border-left: 5px solid #80565D;
     transform: translateY(-5px);
     box-shadow: 0 8px 15px rgba(128, 86, 93, 0.15); /* Cor de sombra levemente escura da Secondary */
 }
